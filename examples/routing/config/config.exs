@@ -27,9 +27,8 @@ config :libcluster, :topologies,
 #     Application.get_env(:routing, :key)
 #
 # You can also configure a third-party app:
-#
-#     config :logger, level: :info
-#
+
+config :logger, level: :info
 
 # It is also possible to import configuration files, relative to this
 # directory. For example, you can emulate configuration per environment
