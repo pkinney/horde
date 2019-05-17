@@ -1,21 +1,36 @@
 # Routing
 
-**TODO: Add description**
+Example application that demonstrates using [Horde] (https://github.com/derekkraan/horde) to manage a colleciton of processes across multiple nodes.
 
-## Installation
+To see it in action, start up three nodes locally with `iex`. From the root of this application, run each of the following in its own terminal:
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `routing` to your list of dependencies in `mix.exs`:
-
-```elixir
-def deps do
-  [
-    {:routing, "~> 0.1.0"}
-  ]
-end
+```
+> iex -name=count1@127.0.0.1 -S mix
+> iex -name=count2@127.0.0.1 -S mix
+> iex -name=count3@127.0.0.1 -S mix
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at [https://hexdocs.pm/routing](https://hexdocs.pm/routing).
+There is one GenServer (`Worker`) which acts as a simple counter (casting `:increment` increments the count asynchronously and calling `:value` returns the current count).  The `Router` module allows you to increment different counters denoted by and atom `name`.  Internally, `Router` uses `Horde.Registry.lookup` to determine if a `Worker` process for a given `name` exists, and if not starts one.  Then it either calls that process using the PID returned or using the `:via` method as outlined in the Horde documentation.
 
+From one of the terminals openned, you can use interact directly with the `Router`:
+
+```
+> Routing.Router.Via.increment(:foo)
+> Routing.Router.Via.increment(:foo)
+> Routing.Router.Via.value(:foo)
+2
+```
+
+Or you can use the PID-based method:
+
+```
+> Routing.Router.PID.increment(:foo)
+> Routing.Router.PID.value(:foo)
+1
+```
+
+In order to demonstrate race conditions (as mentioned in [https://github.com/derekkraan/horde/issues/22]), there is a `Demo` module that makes sample calls rapidly, which (using the `:via` method) will sometimes catch `Horde.Registry` and `Horde.Supervisor` out of sync due to eventual consistency of the Registry.
+
+```
+> Demo.go_via()
+```
