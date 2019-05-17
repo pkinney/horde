@@ -1,4 +1,4 @@
-defmodule Routing.Worker do
+defmodule Counter.Worker do
   use GenServer
 
   require Logger
@@ -30,5 +30,5 @@ defmodule Routing.Worker do
     {:reply, count, count}
   end
 
-  def via_tuple(name), do: {:via, Horde.Registry, {Routing.Registry, name}}
+  def via_tuple(name), do: {:via, Horde.Registry, {Counter.Registry, name}}
 end

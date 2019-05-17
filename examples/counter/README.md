@@ -1,4 +1,4 @@
-# Routing
+# Horde Example - Distributed Counters
 
 Example application that demonstrates using [Horde] (https://github.com/derekkraan/horde) to manage a colleciton of processes across multiple nodes.
 
@@ -15,17 +15,17 @@ There is one GenServer (`Worker`) which acts as a simple counter (casting `:incr
 From one of the terminals openned, you can use interact directly with the `Router`:
 
 ```
-> Routing.Router.Via.increment(:foo)
-> Routing.Router.Via.increment(:foo)
-> Routing.Router.Via.value(:foo)
+> Counter.Router.Via.increment(:foo)
+> Counter.Router.Via.increment(:foo)
+> Counter.Router.Via.value(:foo)
 2
 ```
 
 Or you can use the PID-based method:
 
 ```
-> Routing.Router.PID.increment(:foo)
-> Routing.Router.PID.value(:foo)
+> Counter.Router.PID.increment(:foo)
+> Counter.Router.PID.value(:foo)
 1
 ```
 
@@ -37,7 +37,7 @@ iex(count1@127.0.0.1)7> Demo.go_via()
 
 iex(count1@127.0.0.1)8> Demo.go_via()
 ** (MatchError) no match of right hand side value: {:error, {:already_started, nil}}
-    (routing) lib/router.ex:25: Routing.Router.PID.lookup_and_start_if_needed/1
-    (routing) lib/router.ex:45: Routing.Router.Via.increment/1
+    (routing) lib/router.ex:25: Counter.Router.PID.lookup_and_start_if_needed/1
+    (routing) lib/router.ex:45: Counter.Router.Via.increment/1
     (routing) lib/demo.ex:5: Demo.go_via/0
 ```
