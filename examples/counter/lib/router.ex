@@ -1,4 +1,4 @@
-defmodule Routing.Router.PID do
+defmodule Counter.Router.PID do
   require Logger
 
   def increment(name) do
@@ -14,7 +14,7 @@ defmodule Routing.Router.PID do
   def lookup_and_start_if_needed(name) do
     lookup =
       Horde.Registry.lookup(
-        Routing.Registry,
+        Counter.Registry,
         name
       )
 
@@ -24,8 +24,8 @@ defmodule Routing.Router.PID do
 
         {:ok, pid} =
           Horde.Supervisor.start_child(
-            Routing.RoutingSupervisor,
-            {Routing.Worker, name: name}
+            Counter.CounterSupervisor,
+            {Counter.Worker, name: name}
           )
 
         Logger.debug("[#{__MODULE__}] New process started for \"#{name}\" (#{inspect(pid)})")
@@ -40,14 +40,14 @@ defmodule Routing.Router.PID do
   end
 end
 
-defmodule Routing.Router.Via do
+defmodule Counter.Router.Via do
   def increment(name) do
-    Routing.Router.PID.lookup_and_start_if_needed(name)
-    GenServer.cast(Routing.Worker.via_tuple(name), :increment)
+    Counter.Router.PID.lookup_and_start_if_needed(name)
+    GenServer.cast(Counter.Worker.via_tuple(name), :increment)
   end
 
   def value(name) do
-    Routing.Router.PID.lookup_and_start_if_needed(name)
-    GenServer.call(Routing.Worker.via_tuple(name), :value)
+    Counter.Router.PID.lookup_and_start_if_needed(name)
+    GenServer.call(Counter.Worker.via_tuple(name), :value)
   end
 end

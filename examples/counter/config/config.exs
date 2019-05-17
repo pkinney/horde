@@ -5,7 +5,7 @@ use Mix.Config
 config :logger, handle_sasl_reports: true, level: :debug
 
 config :libcluster, :topologies,
-  routing_cluster: [
+  counter_cluster: [
     strategy: Cluster.Strategy.EpmdHealthy,
     config: [
       hosts: [:"count1@127.0.0.1", :"count2@127.0.0.1", :"count3@127.0.0.1"]
@@ -28,7 +28,7 @@ config :libcluster, :topologies,
 #
 # You can also configure a third-party app:
 
-config :logger, level: :info
+# config :logger, level: :info
 
 # It is also possible to import configuration files, relative to this
 # directory. For example, you can emulate configuration per environment
