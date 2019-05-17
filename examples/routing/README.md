@@ -32,5 +32,12 @@ Or you can use the PID-based method:
 In order to demonstrate race conditions (as mentioned in [https://github.com/derekkraan/horde/issues/22]), there is a `Demo` module that makes sample calls rapidly, which (using the `:via` method) will sometimes catch `Horde.Registry` and `Horde.Supervisor` out of sync due to eventual consistency of the Registry.
 
 ```
-> Demo.go_via()
+iex(count1@127.0.0.1)7> Demo.go_via()
+3
+
+iex(count1@127.0.0.1)8> Demo.go_via()
+** (MatchError) no match of right hand side value: {:error, {:already_started, nil}}
+    (routing) lib/router.ex:25: Routing.Router.PID.lookup_and_start_if_needed/1
+    (routing) lib/router.ex:45: Routing.Router.Via.increment/1
+    (routing) lib/demo.ex:5: Demo.go_via/0
 ```
