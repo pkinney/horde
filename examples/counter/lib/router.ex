@@ -23,31 +23,22 @@ defmodule Counter.Router.Via do
 end
 
 defmodule Counter.Router do
-  require Logger
+  @doc """
+  This is the central part of this example.  It uses `Horde.Registry` to find
+  a Counter process for the specified name.
 
+  * If one is found, it retuns the PID of that process
+  * If one is not found, it starts one using `Horde.Supervisor.start_child` and
+    returns its PID
+  """
   def lookup_and_start_if_needed(name) do
-    lookup =
-      Horde.Registry.lookup(
-        Counter.Registry,
-        name
-      )
-
-    case lookup do
-      :undefined ->
-        Logger.debug("[#{__MODULE__}] Process not found for \"#{name}\".")
-
-        {:ok, pid} =
-          Horde.Supervisor.start_child(
-            Counter.CounterSupervisor,
-            {Counter.Worker, name: name}
-          )
-
-        Logger.debug("[#{__MODULE__}] New process started for \"#{name}\" (#{inspect(pid)})")
-
+    case Horde.Registry.lookup(Counter.Registry, name) do
+      [{pid, _}] ->
         pid
 
-      [{pid, _}] ->
-        Logger.debug("[#{__MODULE__}] Process for \"#{name}\" found (#{inspect(pid)})")
+      :undefined ->
+        {:ok, pid} =
+          Horde.Supervisor.start_child(Counter.CounterSupervisor, {Counter.Worker, name: name})
 
         pid
     end
