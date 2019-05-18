@@ -108,7 +108,25 @@ defmodule Horde.Registry do
 
   ### Public API
 
-  @doc "Register a process under the given name"
+  @doc """
+  Register a process under the given name
+
+  When 2 clustered registries register the same name at exactly the
+  same time, it will seem like name registration succeeds for both
+  registries. The function returns `{:ok, pid}` for both of these
+  calls.
+
+  However, due to the eventual consistent nature of the CRDT, a
+  conflict resolution will take place, and the CRDT will pick one of
+  the two processes as the "winner" of the name. The losing process
+  will be sent an exit signal (using `Process.exit/2`) with the
+  following reason:
+
+  `{:name_conflict, {name, value}, registry_name, winning_pid}`
+
+  When two registries are joined using `Horde.Cluster.set_members/2`,
+  this name conflict message can also occur.
+  """
   @spec register(
           registry :: GenServer.server(),
           name :: Registry.key(),
