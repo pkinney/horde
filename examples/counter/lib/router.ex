@@ -1,15 +1,29 @@
 defmodule Counter.Router.PID do
-  require Logger
-
   def increment(name) do
-    lookup_and_start_if_needed(name)
+    Counter.Router.lookup_and_start_if_needed(name)
     |> GenServer.cast(:increment)
   end
 
   def value(name) do
-    lookup_and_start_if_needed(name)
+    Counter.Router.lookup_and_start_if_needed(name)
     |> GenServer.call(:value)
   end
+end
+
+defmodule Counter.Router.Via do
+  def increment(name) do
+    Counter.Router.lookup_and_start_if_needed(name)
+    GenServer.cast(Counter.Worker.via_tuple(name), :increment)
+  end
+
+  def value(name) do
+    Counter.Router.lookup_and_start_if_needed(name)
+    GenServer.call(Counter.Worker.via_tuple(name), :value)
+  end
+end
+
+defmodule Counter.Router do
+  require Logger
 
   def lookup_and_start_if_needed(name) do
     lookup =
@@ -37,17 +51,5 @@ defmodule Counter.Router.PID do
 
         pid
     end
-  end
-end
-
-defmodule Counter.Router.Via do
-  def increment(name) do
-    Counter.Router.PID.lookup_and_start_if_needed(name)
-    GenServer.cast(Counter.Worker.via_tuple(name), :increment)
-  end
-
-  def value(name) do
-    Counter.Router.PID.lookup_and_start_if_needed(name)
-    GenServer.call(Counter.Worker.via_tuple(name), :value)
   end
 end
