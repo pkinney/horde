@@ -1,10 +1,9 @@
 # Horde Example - Distributed CountersAdd and example of routing messages to a growing set of managed processes
 
-Example application that demonstrates using [Horde] (https://github.com/derekkraan/horde) to manage a colleciton of dynamically-created processes, each responsible for a partition of messsages and created automatically when a relevant message is received.
+An example application that demonstrates using [Horde] (https://github.com/derekkraan/horde) to manage a collection of dynamically-created processes, each responsible for a partition of messages and created automatically when a relevant message is received.
 
+There is one GenServer (`Worker`) which acts as a simple counter (casting `:increment` increments the count asynchronously and calling `:value` returns the current count).  The `Router` module allows you to increment different counters denoted by an atom `name`.  Internally, `Router` uses `Horde.Registry.lookup` to determine if a `Worker` process for a given `name` exists and if not starts one.  Then it either calls that process using the PID returned or using the `:via` method as outlined in the Horde documentation.
 
-
-There is one GenServer (`Worker`) which acts as a simple counter (casting `:increment` increments the count asynchronously and calling `:value` returns the current count).  The `Router` module allows you to increment different counters denoted by and atom `name`.  Internally, `Router` uses `Horde.Registry.lookup` to determine if a `Worker` process for a given `name` exists, and if not starts one.  Then it either calls that process using the PID returned or using the `:via` method as outlined in the Horde documentation.
 
 To see it in action, start up three nodes locally with `iex`. From the root of this application, run each of the following in its own terminal:
 
