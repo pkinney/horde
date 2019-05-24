@@ -15,7 +15,8 @@ defmodule Horde.SupervisorImpl do
   defstruct name: nil,
             members: %{},
             members_info: %{},
-            processes: %{},
+            processes_by_id: %{},
+            process_pid_to_id: %{},
             waiting_for_quorum: [],
             processes_updated_counter: 0,
             processes_updated_at: 0,
@@ -105,60 +106,54 @@ defmodule Horde.SupervisorImpl do
     {:reply, {:ok, Map.keys(state.members)}, state}
   end
 
-  def handle_call({:terminate_child, child_id} = msg, from, state) do
+  def handle_call({:terminate_child, child_pid} = msg, from, state) do
     this_name = fully_qualified_name(state.name)
 
-    case Map.get(state.processes, child_id) do
-      {^this_name, _child_spec} ->
-        reply =
-          Horde.DynamicSupervisor.terminate_child_by_id(
-            supervisor_name(state.name),
-            child_id
-          )
+    with child_id when not is_nil(child_id) <- Map.get(state.process_pid_to_id, child_pid),
+         {^this_name, _child_spec, _child_pid} <- Map.get(state.processes_by_id, child_id) do
+      reply =
+        Horde.DynamicSupervisor.terminate_child_by_id(
+          supervisor_name(state.name),
+          child_id
+        )
 
-        new_state = %{state | processes: Map.delete(state.processes, child_id)}
+      new_state = %{state | processes_by_id: Map.delete(state.processes_by_id, child_id)}
 
-        :ok = DeltaCrdt.mutate(crdt_name(state.name), :remove, [{:process, child_id}], :infinity)
+      :ok = DeltaCrdt.mutate(crdt_name(state.name), :remove, [{:process, child_id}], :infinity)
 
-        {:reply, reply, new_state}
-
-      {other_node, _child_spec} ->
+      {:reply, reply, new_state}
+    else
+      {other_node, _child_spec, _child_pid} ->
         proxy_to_node(other_node, msg, from, state)
 
       nil ->
-        case state.distribution_strategy.choose_node(child_id, Map.values(members(state))) do
-          {:ok, %{name: ^this_name}} ->
-            {:reply, {:error, :not_found}, state}
-
-          {:ok, %{name: other_node_name}} ->
-            proxy_to_node(other_node_name, msg, from, state)
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+        {:reply, {:error, :not_found}, state}
     end
   end
 
   def handle_call({:start_child, _child_spec}, _from, %{shutting_down: true} = state),
     do: {:reply, {:error, {:shutting_down, "this node is shutting down."}}, state}
 
+  @big_number round(:math.pow(2, 128))
+
   def handle_call({:start_child, child_spec} = msg, from, state) do
     this_name = fully_qualified_name(state.name)
 
-    if Map.has_key?(state.processes, child_spec.id) do
-      {:reply, {:error, {:already_started, nil}}, state}
-    else
-      case state.distribution_strategy.choose_node(child_spec.id, Map.values(members(state))) do
-        {:ok, %{name: ^this_name}} ->
-          {reply, new_state} = add_child(child_spec, state)
-          {:reply, reply, new_state}
+    child_spec = Map.put(child_spec, :id, :rand.uniform(@big_number))
 
-        {:ok, %{name: other_node_name}} ->
-          proxy_to_node(other_node_name, msg, from, state)
+    case state.distribution_strategy.choose_node(
+           child_spec.id,
+           Map.values(members(state))
+         ) do
+      {:ok, %{name: ^this_name}} ->
+        {reply, new_state} = add_child(child_spec, state)
+        {:reply, reply, new_state}
 
-        {:error, reason} ->
-          {:reply, {:error, reason}, state}
-      end
+      {:ok, %{name: other_node_name}} ->
+        proxy_to_node(other_node_name, msg, from, state)
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -175,6 +170,7 @@ defmodule Horde.SupervisorImpl do
           :exit, _ -> []
         end
       end)
+      |> Enum.map(fn {_id, pid, type, module} -> {:undefined, pid, type, module} end)
 
     {:reply, which_children, state}
   end
@@ -203,9 +199,48 @@ defmodule Horde.SupervisorImpl do
     {:reply, count, state}
   end
 
+  def handle_call({:update_child_pid, child_id, new_pid}, _from, state) do
+    {:reply, :ok, set_child_pid(state, child_id, new_pid)}
+  end
+
+  defp set_child_pid(state, child_id, new_child_pid) do
+    case Map.get(state.processes_by_id, child_id) do
+      {name, child, old_pid} ->
+        :ok =
+          DeltaCrdt.mutate(
+            crdt_name(state.name),
+            :add,
+            [{:process, child.id}, {fully_qualified_name(state.name), child, new_child_pid}],
+            :infinity
+          )
+
+        new_processes_by_id =
+          Map.put(state.processes_by_id, child_id, {name, child, new_child_pid})
+
+        new_process_pid_to_id =
+          Map.put(state.process_pid_to_id, new_child_pid, child_id) |> Map.delete(old_pid)
+
+        %{
+          state
+          | processes_by_id: new_processes_by_id,
+            process_pid_to_id: new_process_pid_to_id
+        }
+
+      nil ->
+        state
+    end
+  end
+
   # TODO think of a better name than "disown_child_process"
   def handle_cast({:disown_child_process, child_id}, state) do
-    new_state = %{state | processes: Map.delete(state.processes, child_id)}
+    {{_, _, child_pid}, new_processes_by_id} = Map.pop(state.processes_by_id, child_id)
+
+    new_state = %{
+      state
+      | processes_by_id: new_processes_by_id,
+        process_pid_to_id: Map.delete(state.process_pid_to_id, child_pid)
+    }
+
     :ok = DeltaCrdt.mutate(crdt_name(state.name), :remove, [{:process, child_id}], :infinity)
     {:noreply, new_state}
   end
@@ -351,27 +386,47 @@ defmodule Horde.SupervisorImpl do
     end
   end
 
-  defp update_process(state, {:add, {:process, child_id}, {node, child_spec}}) do
+  defp update_process(state, {:add, {:process, child_id}, {node, child_spec, child_pid}}) do
     this_node = fully_qualified_name(state.name)
 
-    case {Map.get(state.processes, child_id), node} do
-      {{^this_node, _child_spec}, ^this_node} ->
+    case {Map.get(state.processes_by_id, child_id), node} do
+      {{^this_node, _child_spec, _child_pid}, ^this_node} ->
         nil
 
-      {{^this_node, _child_spec}, _other_node} ->
+      {{^this_node, _child_spec, _child_pid}, _other_node} ->
         Horde.DynamicSupervisor.terminate_child_by_id(supervisor_name(state.name), child_id)
 
       _ ->
         nil
     end
 
-    new_processes = Map.put(state.processes, child_id, {node, child_spec})
-    Map.put(state, :processes, new_processes)
+    new_process_pid_to_id =
+      case Map.get(state.processes_by_id, child_id) do
+        {_, _, old_pid} -> Map.delete(state.process_pid_to_id, old_pid)
+        nil -> state.process_pid_to_id
+      end
+      |> Map.put(child_pid, child_id)
+
+    new_processes_by_id = Map.put(state.processes_by_id, child_id, {node, child_spec, child_pid})
+
+    Map.put(state, :processes_by_id, new_processes_by_id)
+    |> Map.put(:process_pid_to_id, new_process_pid_to_id)
   end
 
   defp update_process(state, {:remove, {:process, child_id}}) do
-    new_processes = Map.delete(state.processes, child_id)
-    Map.put(state, :processes, new_processes)
+    {value, new_processes_by_id} = Map.pop(state.processes_by_id, child_id)
+
+    new_process_pid_to_id =
+      case value do
+        {_node_name, _child_spec, child_pid} ->
+          Map.delete(state.process_pid_to_id, child_pid)
+
+        nil ->
+          state.process_pid_to_id
+      end
+
+    Map.put(state, :processes_by_id, new_processes_by_id)
+    |> Map.put(:process_pid_to_id, new_process_pid_to_id)
   end
 
   defp update_process(state, _), do: state
@@ -423,15 +478,18 @@ defmodule Horde.SupervisorImpl do
       end)
       |> MapSet.new()
 
-    check_processes(state, Map.values(state.processes), not_dead_members)
+    check_processes(state, Map.values(state.processes_by_id), not_dead_members)
   end
 
-  defp check_processes(state, [{member, child} | procs], not_dead_members) do
+  defp check_processes(state, [{member, child, _child_pid} | procs], not_dead_members) do
     this_name = fully_qualified_name(state.name)
 
     with false <- MapSet.member?(not_dead_members, member),
          {:ok, %{name: ^this_name}} <-
-           state.distribution_strategy.choose_node(child.id, Map.values(members(state))),
+           state.distribution_strategy.choose_node(
+             child.id,
+             Map.values(members(state))
+           ),
          {_result, state} <- add_child(child, state) do
       state
     else
@@ -501,7 +559,7 @@ defmodule Horde.SupervisorImpl do
   end
 
   defp shut_down_all_processes(state) do
-    case Enum.any?(state.processes, processes_for_node(fully_qualified_name(state.name))) do
+    case Enum.any?(state.processes_by_id, processes_for_node(fully_qualified_name(state.name))) do
       false ->
         state
 
@@ -523,7 +581,7 @@ defmodule Horde.SupervisorImpl do
 
   defp processes_for_node(node_name) do
     fn
-      {_id, {^node_name, _child_spec}} -> true
+      {_id, {^node_name, _child_spec, _child_pid}} -> true
       _ -> false
     end
   end
@@ -556,19 +614,26 @@ defmodule Horde.SupervisorImpl do
     |> Map.put(:name_to_supervisor_ref, new_name_to_supervisor_ref)
   end
 
-  defp update_state_with_child(child, state) do
+  defp update_state_with_child(child, child_pid, state) do
     :ok =
       DeltaCrdt.mutate(
         crdt_name(state.name),
         :add,
-        [{:process, child.id}, {fully_qualified_name(state.name), child}],
+        [{:process, child.id}, {fully_qualified_name(state.name), child, child_pid}],
         :infinity
       )
 
-    %{
-      state
-      | processes: Map.put(state.processes, child.id, {fully_qualified_name(state.name), child})
-    }
+    new_processes_by_id =
+      Map.put(
+        state.processes_by_id,
+        child.id,
+        {fully_qualified_name(state.name), child, child_pid}
+      )
+
+    new_process_pid_to_id = Map.put(state.process_pid_to_id, child_pid, child.id)
+
+    Map.put(state, :processes_by_id, new_processes_by_id)
+    |> Map.put(:process_pid_to_id, new_process_pid_to_id)
   end
 
   defp add_child(child, state) do
@@ -590,11 +655,11 @@ defmodule Horde.SupervisorImpl do
       end
     end)
     |> Enum.reduce({[], state}, fn
-      {{:ok, _child_pid} = resp, child}, {responses, state} ->
-        {[resp | responses], update_state_with_child(child, state)}
+      {{:ok, child_pid} = resp, child}, {responses, state} ->
+        {[resp | responses], update_state_with_child(child, child_pid, state)}
 
-      {{:ok, _child_pid, _term} = resp, child}, {responses, state} ->
-        {[resp | responses], update_state_with_child(child, state)}
+      {{:ok, child_pid, _term} = resp, child}, {responses, state} ->
+        {[resp | responses], update_state_with_child(child, child_pid, state)}
 
       {:error, error}, {responses, state} ->
         {[{:error, error} | responses], state}
